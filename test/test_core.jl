@@ -122,6 +122,10 @@ end
 
 struct UserDefinedLens <: Lens end
 
+struct LensWithTextPlain <: Lens end
+Base.show(io::IO, ::MIME"text/plain", ::LensWithTextPlain) =
+    print(io, "I define text/plain.")
+
 
 @testset "show it like you build it " begin
     i = 3
@@ -143,6 +147,7 @@ struct UserDefinedLens <: Lens end
             (@lens _.a) ∘ UserDefinedLens()
             UserDefinedLens() ∘ (@lens _.b)
             (@lens _.a) ∘ UserDefinedLens() ∘ (@lens _.b)
+            (@lens _.a) ∘ LensWithTextPlain() ∘ (@lens _.b)
         ]
         buf = IOBuffer()
         show(buf, item)
@@ -351,11 +356,24 @@ Setfield.constructor_of(::Type{<: B{T}}) where T = B{T}
     @test obj2 === B{1}(2, :three)
 end
 
-@testset "show_generic" begin
-    l = @lens _[1]
-    s = sprint(Setfield.show_generic,l)
-    l2 = eval(Meta.parse(s))
-    @test l == l2
+@testset "text/plain show" begin
+    @testset for lens in [
+        LensWithTextPlain()
+        (@lens _.a) ∘ LensWithTextPlain()
+        LensWithTextPlain() ∘ (@lens _.b)
+        (@lens _.a) ∘ LensWithTextPlain() ∘ (@lens _.b)
+    ]
+        @test occursin("I define text/plain.", sprint(show, "text/plain", lens))
+    end
+
+    @testset for lens in [
+        UserDefinedLens()
+        (@lens _.a) ∘ UserDefinedLens()
+        UserDefinedLens() ∘ (@lens _.b)
+        (@lens _.a) ∘ UserDefinedLens() ∘ (@lens _.b)
+    ]
+        @test sprint(show, lens) == sprint(show, "text/plain", lens)
+    end
 end
 
 @testset "Named Tuples" begin

@@ -166,11 +166,12 @@ macro lens(ex)
     lens
 end
 
-has_atlens_support(::Any) = false
-has_atlens_support(::Union{PropertyLens, IndexLens, ConstIndexLens, FunctionLens, IdentityLens}) =
+has_atlens_support(l::Lens) = has_atlens_support(typeof(l))
+has_atlens_support(::Type{<:Lens}) = false
+has_atlens_support(::Type{<:Union{PropertyLens, IndexLens, ConstIndexLens, FunctionLens, IdentityLens}}) =
     true
-has_atlens_support(l::ComposedLens) =
-    has_atlens_support(l.outer) && has_atlens_support(l.inner)
+has_atlens_support(::Type{ComposedLens{LO, LI}}) where {LO, LI} =
+    has_atlens_support(LO) && has_atlens_support(LI)
 
 print_application(io::IO, l::PropertyLens{field}) where {field} = print(io, ".", field)
 print_application(io::IO, l::IndexLens) = print(io, "[", join(repr.(l.indices), ", "), "]")
@@ -201,21 +202,30 @@ function print_application(printer, io, l::ComposedLens)
     end
 end
 
-function Base.show(io::IO, l::Lens)
+# Since `show` of `ComposedLens` needs to call `show` of other lenses,
+# we explicitly define text/plain `show` for `ComposedLens` to propagate
+# the "context" (2-arg or 3-arg `show`) with which `show` has to be called.
+# See: https://github.com/jw3126/Setfield.jl/pull/86
+Base.show(io::IO, ::MIME"text/plain", l::ComposedLens) =
+    _show(io, MIME("text/plain"), l)
+
+function _show(io::IO, mime, l::Lens)
     if has_atlens_support(l)
         print_in_atlens(io, l)
+    elseif mime === nothing
+        show(io, l)
     else
-        show_generic(io, l)
+        show(io, mime, l)
     end
 end
 
-function Base.show(io::IO, l::ComposedLens)
+function _show(io::IO, mime, l::ComposedLens)
     if has_atlens_support(l)
         print_in_atlens(io, l)
     else
-        show(io, l.outer)
+        _show(io, mime, l.outer)
         print(io, " ∘ ")
-        show(io, l.inner)
+        _show(io, mime, l.inner)
     end
 end
 
@@ -226,10 +236,3 @@ function print_in_atlens(io, l)
     end
     print(io, ')')
 end
-
-function show_generic(io::IO, args...)
-    types = tuple(typeof(io), Base.Iterators.repeated(Any, length(args))...)
-    Types = Tuple{types...}
-    invoke(show, Types, io, args...)
-end
-show_generic(args...) = show_generic(stdout, args...)
