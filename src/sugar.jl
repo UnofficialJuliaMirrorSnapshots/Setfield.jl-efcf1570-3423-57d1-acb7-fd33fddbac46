@@ -29,7 +29,7 @@ T(T(2, 3), 2)
 ```
 """
 macro set(ex)
-    atset_impl(ex, overwrite=false)
+    setmacro(identity, ex, overwrite=false)
 end
 
 """
@@ -47,7 +47,7 @@ julia> t
 (a = 2,)
 """
 macro set!(ex)
-    atset_impl(ex, overwrite=true)
+    setmacro(identity, ex, overwrite=true)
 end
 
 is_interpolation(x) = x isa Expr && x.head == :$
@@ -86,23 +86,23 @@ function parse_obj_lenses(ex)
                     " with and without \$) cannot be mixed.")))
             end
             index = esc(Expr(:tuple, [x.args[1] for x in indices]...))
-            lens = :(ConstIndexLens{$index}())
+            lens = :($ConstIndexLens{$index}())
         elseif any(need_dynamic_lens, indices)
             @gensym collection
             indices = replace_underscore.(indices, collection)
             dims = length(indices) == 1 ? nothing : 1:length(indices)
             lindices = esc.(lower_index.(collection, indices, dims))
-            lens = :(DynamicIndexLens($(esc(collection)) -> ($(lindices...),)))
+            lens = :($DynamicIndexLens($(esc(collection)) -> ($(lindices...),)))
         else
             index = esc(Expr(:tuple, indices...))
-            lens = :(IndexLens($index))
+            lens = :($IndexLens($index))
         end
     elseif @capture(ex, front_.property_)
         obj, frontlens = parse_obj_lenses(front)
-        lens = :(PropertyLens{$(QuoteNode(property))}())
+        lens = :($PropertyLens{$(QuoteNode(property))}())
     elseif @capture(ex, f_(front_))
         obj, frontlens = parse_obj_lenses(front)
-        lens = :(FunctionLens($(esc(f))))
+        lens = :($FunctionLens($(esc(f))))
     else
         obj = esc(ex)
         return obj, ()
@@ -112,7 +112,7 @@ end
 
 function parse_obj_lens(ex)
     obj, lenses = parse_obj_lenses(ex)
-    lens = Expr(:call, :compose, lenses...)
+    lens = Expr(:call, compose, lenses...)
     obj, lens
 end
 
@@ -133,7 +133,23 @@ struct _UpdateOp{OP,V}
 end
 (u::_UpdateOp)(x) = u.op(x, u.val)
 
-function atset_impl(ex::Expr; overwrite::Bool)
+"""
+    setmacro(lenstransform, ex::Expr; overwrite::Bool=false)
+
+This function can be used to create a customized variant of [`@set`](@ref).
+It works by applying `lenstransform` to the lens that is used in the customized `@set` macro
+at runtime.
+```julia
+function mytransform(lens::Lens)::Lens
+    ...
+end
+macro myset(ex)
+    setmacro(mytransform, ex)
+end
+```
+See also [`lensmacro`](@ref).
+"""
+function setmacro(lenstransform, ex::Expr; overwrite::Bool=false)
     @assert ex.head isa Symbol
     @assert length(ex.args) == 2
     ref, val = ex.args
@@ -142,14 +158,15 @@ function atset_impl(ex::Expr; overwrite::Bool)
     val = esc(val)
     ret = if ex.head == :(=)
         quote
-            lens = $lens
-            $dst = set($obj, lens, $val)
+            lens = ($lenstransform)($lens)
+            $dst = $set($obj, lens, $val)
         end
     else
         op = get_update_op(ex.head)
-        f = :(_UpdateOp($op,$val))
+        f = :($_UpdateOp($op,$val))
         quote
-            $dst = modify($f, $obj, $lens)
+            lens = ($lenstransform)($lens)
+            $dst = $modify($f, $obj, lens)
         end
     end
     ret
@@ -188,12 +205,32 @@ julia> set(t, (@lens _[1]), "1")
 
 """
 macro lens(ex)
+    lensmacro(identity, ex)
+end
+
+
+"""
+    lensmacro(lenstransform, ex::Expr)
+
+This function can be used to create a customized variant of [`@lens`](@ref).
+It works by applying `lenstransform` to the created lens at runtime.
+```julia
+function mytransform(lens::Lens)::Lens
+    ...
+end
+macro mylens(ex)
+    lensmacro(mytransform, ex)
+end
+```
+See also [`setmacro`](@ref).
+"""
+function lensmacro(lenstransform, ex)
     obj, lens = parse_obj_lens(ex)
     if obj != esc(:_)
-        msg = """Cannot parse lens $ex. Lens expressions must start with @lens _"""
+        msg = """Cannot parse lens $ex. Lens expressions must start with _, got $obj instead."""
         throw(ArgumentError(msg))
     end
-    lens
+    :($(lenstransform)($lens))
 end
 
 has_atlens_support(l::Lens) = has_atlens_support(typeof(l))
