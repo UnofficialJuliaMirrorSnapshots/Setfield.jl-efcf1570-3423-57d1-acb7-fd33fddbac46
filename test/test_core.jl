@@ -158,7 +158,23 @@ Base.show(io::IO, ::MIME"text/plain", ::LensWithTextPlain) =
         show(buf, item)
         item2 = eval(Meta.parse(String(take!(buf))))
         @test item === item2
+
+        # showing of Type{<:Lens}
+        show(buf, typeof(item))
+        typeof_item2 = eval(Meta.parse(String(take!(buf))))
+        @test typeof(item) === typeof_item2
     end
+end
+
+@testset "show of typeof(::FunctionLens)" begin
+    buf = IOBuffer()
+    flens = @lens first(_)
+    show(buf, typeof(flens))
+    @test String(take!(buf)) == "typeof(@lens first(_))"
+
+    # test correct printing of UnionAll
+    show(buf, Setfield.FunctionLens)
+    @test String(take!(buf)) == "Setfield.FunctionLens"
 end
 
 function test_getset_laws(lens, obj, val1, val2)
@@ -442,6 +458,10 @@ ConstructionBase.constructorof(::Type{CustomProperties}) = error()
     @test o2 == CustomProperties(:A, "B")
     o3 = @set o.b = :B
     @test o3 == CustomProperties("A", :B)
+end
+
+@testset "issue #83" begin
+    @test_throws ArgumentError Setfield.lensmacro(identity, :(_.[:a]))
 end
 
 end

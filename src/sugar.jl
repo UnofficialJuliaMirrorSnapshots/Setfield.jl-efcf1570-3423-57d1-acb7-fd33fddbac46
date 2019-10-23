@@ -98,6 +98,10 @@ function parse_obj_lenses(ex)
             lens = :($IndexLens($index))
         end
     elseif @capture(ex, front_.property_)
+        property isa Union{Symbol,String} || throw(ArgumentError(
+            string("Error while parsing :($ex). Second argument to `getproperty` can only be",
+                   "a `Symbol` or `String` literal, received `$property` instead.")
+        ))
         obj, frontlens = parse_obj_lenses(front)
         lens = :($PropertyLens{$(QuoteNode(property))}())
     elseif @capture(ex, f_(front_))
@@ -302,4 +306,9 @@ function print_in_atlens(io, l)
         print(io, '_')
     end
     print(io, ')')
+end
+
+function Base.show(io::IO, T::Type{<:FunctionLens{S}}) where S
+   print(io, "typeof")
+   show(io, T())
 end
